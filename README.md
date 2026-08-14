@@ -112,6 +112,17 @@ $DSH_HOME/openai-codex-auth.json
 
 </details>
 
+<details>
+<summary><strong>如何通过 HTTP 代理连接 OpenAI？</strong></summary>
+
+启动 DSH 前设置 `HTTP_PROXY`、`HTTPS_PROXY` 和可选的 `NO_PROXY`。插件会自动读取这些环境变量，无需设置 `NODE_USE_ENV_PROXY`。
+
+```sh
+HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 dsh --profile web
+```
+
+</details>
+
 ## 本地开发
 
 ```sh
