@@ -2,6 +2,8 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { createHash, randomBytes } from 'node:crypto'
@@ -16,6 +18,9 @@ const REDIRECT_URI = 'http://localhost:1455/auth/callback'
 const DEFAULT_FILENAME = 'openai-codex-auth.json'
 const TOKEN_REF = credentialRef('DSH_OPENAI_CODEX_TOKEN')
 const CONTROL_PORT = 1456
+
+/** Replaceable Node boundary for deterministic listener lifecycle tests. */
+export const internals = { createServer }
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
 const USAGE_CACHE_MS = 30_000
 
@@ -27,7 +32,6 @@ export interface OpenAICodexCredential {
   accountId: string
 }
 
-/** Plugin configuration. */
 export interface Config { path?: string; dshHome?: string }
 
 interface Document { version: 1; credential: OpenAICodexCredential }
@@ -170,11 +174,14 @@ declare module '@deepseek-ai/cordis' { interface Context { openaiCodexAuth: Open
 /** DSH service providing login, logout, and automatically refreshed bearer tokens. */
 export class OpenAICodexAuth extends Service {
   static Config: z<Config> = z.object({ path: z.string(), dshHome: z.string() })
-  static inject = ['credentials']
+  static inject = ['credentials', 'commands']
   private readonly filename: string
   private readonly csrf = base64Url(randomBytes(24))
   private usageCache: UsageSummary | undefined
   private usageError: string | undefined
+  private controlServerStart: Promise<void> | undefined
+  private controlServerRequested = false
+  private controlServerStop: (() => void) | undefined
   private loginFlow: LoginFlow | undefined
   private lastLoginError: string | undefined
 
@@ -190,7 +197,35 @@ export class OpenAICodexAuth extends Service {
       const timer = setInterval(() => { void this.bearerToken().catch(() => {}) }, 60_000)
       return () => { clearInterval(timer) }
     })
-    ctx.effect(() => this.startControlServer())
+    ctx.inject(['webServer'], (webCtx) => {
+      webCtx.effect(() => webCtx.webServer.register({
+        kind: 'exact',
+        path: '/api/plugins/openai-codex-auth/control',
+        handler: async (request, response) => {
+          if (request.method !== 'POST') {
+            response.writeHead(405, { allow: 'POST' }).end()
+            return
+          }
+          await this.ensureControlServer()
+          response.writeHead(204, { 'cache-control': 'no-store' }).end()
+        },
+      }))
+    })
+    ctx.effect(() => () => {
+      this.loginFlow?.abort.abort()
+      this.stopControlServer()
+    })
+    ctx.effect(() => ctx.commands.register({
+      name: 'login-codex',
+      description: '登录 OpenAI Codex 订阅账号',
+      handler: () => {
+        const flow = this.beginBrowserLogin()
+        return {
+          kind: 'success',
+          text: `请在浏览器打开以下链接完成 OpenAI 登录：\n\n${flow.url}\n\n授权完成后，Codex 凭据会自动生效。`,
+        }
+      },
+    }))
   }
 
   /** Return a valid bearer token, refreshing and persisting it when near expiry. */
@@ -304,9 +339,32 @@ export class OpenAICodexAuth extends Service {
     return normalizeUsage(await response.json())
   }
 
+  private async ensureControlServer(): Promise<void> {
+    this.controlServerRequested = true
+    if (this.controlServerStop !== undefined) return
+    if (this.controlServerStart !== undefined) return this.controlServerStart
+    const start = this.startControlServer().then((stop) => {
+      if (this.controlServerRequested) this.controlServerStop = stop
+      else stop()
+    })
+    this.controlServerStart = start
+    try {
+      await start
+    } finally {
+      if (this.controlServerStart === start) this.controlServerStart = undefined
+    }
+  }
+
+  private stopControlServer(): void {
+    this.controlServerRequested = false
+    const stop = this.controlServerStop
+    this.controlServerStop = undefined
+    stop?.()
+  }
+
   private startControlServer(): Promise<() => void> {
     return new Promise((resolveStart, rejectStart) => {
-      const server = createServer((request, response) => { void this.controlRequest(request, response) })
+      const server = internals.createServer((request, response) => { void this.controlRequest(request, response) })
       server.once('error', rejectStart)
       server.listen(CONTROL_PORT, '127.0.0.1', () => {
         server.removeListener('error', rejectStart)
@@ -342,6 +400,7 @@ export class OpenAICodexAuth extends Service {
       }
       if (url.pathname === '/start' && request.method === 'GET') {
         const flow = this.beginBrowserLogin()
+        void flow.completion.finally(() => { this.stopControlServer() })
         response.writeHead(302, { location: flow.url, 'cache-control': 'no-store' }).end()
         return
       }
@@ -359,6 +418,8 @@ export class OpenAICodexAuth extends Service {
       send(404, { error: 'Not found' })
     } catch (error) {
       send(500, { error: error instanceof Error ? error.message : String(error) })
+    } finally {
+      if (this.loginFlow === undefined) setImmediate(() => { this.stopControlServer() })
     }
   }
 
@@ -371,7 +432,7 @@ export class OpenAICodexAuth extends Service {
   private waitForCallback(state: string, signal: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
       let settled = false
-      const server = createServer((request, response) => {
+      const server = internals.createServer((request, response) => {
         const url = new URL(request.url ?? '', REDIRECT_URI)
         if (url.pathname !== '/auth/callback' || url.searchParams.get('state') !== state) {
           response.writeHead(400).end('Invalid OpenAI OAuth callback.')
