@@ -9,6 +9,7 @@ window.__ModuleLoader__.load({
     const { createElement: h, useCallback, useEffect, useMemo, useState } = React
     const BASE = 'http://127.0.0.1:1456'
     const PLUGIN_ID = 'dsh-openai-codex-auth'
+    const WAKE = '/api/plugins/openai-codex-auth/control'
 
     const css = `
       .codexSection{max-width:760px;padding:24px 28px 40px;color:var(--text-primary,#202124)}
@@ -84,8 +85,14 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = useState(false)
       const [watchLogin, setWatchLogin] = useState(false)
 
+      const wake = useCallback(async () => {
+        const response = await fetch(WAKE, { method: 'POST', cache: 'no-store' })
+        if (!response.ok) throw new Error('HTTP ' + response.status)
+      }, [])
+
       const load = useCallback(async (refresh) => {
         try {
+          await wake()
           const response = await fetch(BASE + '/status' + (refresh ? '?refresh=1' : ''), { cache: 'no-store' })
           const value = await response.json()
           if (!response.ok) throw new Error(value.error || 'HTTP ' + response.status)
@@ -93,27 +100,37 @@ window.__ModuleLoader__.load({
           setError('')
           if (value.loggedIn) setWatchLogin(false)
         } catch (loadError) {
-          setError('无法连接本机 Codex 插件服务。请重启 DSH Web profile 后再试。' + (messageOf(loadError) ? ' (' + messageOf(loadError) + ')' : ''))
+          setError('无法启动本机 Codex 插件服务。请重试。' + (messageOf(loadError) ? ' (' + messageOf(loadError) + ')' : ''))
         }
-      }, [])
+      }, [wake])
 
       useEffect(() => {
-        void load(false)
-        const timer = window.setInterval(() => { void load(false) }, watchLogin ? 2000 : 30000)
+        if (!watchLogin) return undefined
+        const timer = window.setInterval(() => { void load(false) }, 2000)
         return () => { window.clearInterval(timer) }
       }, [load, watchLogin])
 
-      const login = () => {
-        const popup = window.open(BASE + '/start', 'dsh-openai-codex-login', 'popup,width=560,height=760')
-        if (popup === null) setError('浏览器阻止了登录窗口，请允许此站点打开弹窗。')
-        setWatchLogin(true)
-        window.setTimeout(() => { void load(false) }, 1000)
+      const login = async () => {
+        const popup = window.open('about:blank', 'dsh-openai-codex-login', 'popup,width=560,height=760')
+        if (popup === null) {
+          setError('浏览器阻止了登录窗口，请允许此站点打开弹窗。')
+          return
+        }
+        try {
+          await wake()
+          popup.location.href = BASE + '/start'
+          setWatchLogin(true)
+        } catch (loginError) {
+          popup.close()
+          setError(messageOf(loginError))
+        }
       }
 
       const logout = async () => {
         if (!status || !status.csrf) return
         setBusy(true)
         try {
+          await wake()
           const response = await fetch(BASE + '/logout', { method: 'POST', headers: { 'x-dsh-csrf': status.csrf } })
           const value = await response.json()
           if (!response.ok) throw new Error(value.error || 'HTTP ' + response.status)
@@ -129,7 +146,7 @@ window.__ModuleLoader__.load({
       }
 
       const usage = status && status.usage
-      const loading = status === null && !error
+      const loading = busy
       const connected = Boolean(status && status.loggedIn)
       const pending = Boolean(status && status.loginPending) || watchLogin
       const plan = usage && usage.planType ? String(usage.planType).toUpperCase() : 'ChatGPT 订阅'
@@ -158,7 +175,7 @@ window.__ModuleLoader__.load({
             ),
           ),
           h('div', { className: 'codexBody' },
-            status === null && !error
+            busy && status === null
               ? h('div', { 'aria-label': '加载中' }, h('div', { className: 'codexSkeleton' }), h('div', { className: 'codexSkeleton', style: { width: '72%' } }))
               : connected
                 ? h(React.Fragment, null,
@@ -173,7 +190,8 @@ window.__ModuleLoader__.load({
             status && status.loginError ? h('p', { className: 'codexError', role: 'alert' }, '登录失败：' + status.loginError) : null,
             error ? h('p', { className: 'codexError', role: 'alert' }, error) : null,
             h('div', { className: 'codexActions' },
-              h('button', { type: 'button', className: 'codexButton primary', disabled: busy || pending || loading, onClick: login }, loading ? '读取状态…' : connected ? '重新登录' : pending ? '等待授权…' : '登录 OpenAI'),
+              h('button', { type: 'button', className: 'codexButton primary', disabled: busy || pending, onClick: () => { void login() } }, connected ? '重新登录' : pending ? '等待授权…' : '登录 OpenAI'),
+              status === null ? h('button', { type: 'button', className: 'codexButton', disabled: busy, onClick: refresh }, busy ? '读取中…' : '读取登录状态') : null,
               connected ? h('button', { type: 'button', className: 'codexButton', disabled: busy, onClick: refresh }, busy ? '刷新中…' : '刷新用量') : null,
               connected ? h('button', { type: 'button', className: 'codexButton danger', disabled: busy, onClick: () => { void logout() } }, '退出登录') : null,
             ),

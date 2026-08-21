@@ -57,17 +57,13 @@ dsh --profile web
 1. 插件生成 PKCE verifier、challenge 和随机 `state`，再打开 OpenAI 授权页。
 2. OpenAI 将授权结果返回到本机 `localhost:1455`；插件校验 `state` 并交换令牌。
 3. 凭据原子写入本地文件，访问令牌通过 DSH credentials 注入 `DSH_OPENAI_CODEX_TOKEN`。
-4. 设置页通过本机 `127.0.0.1:1456` 控制服务读取登录状态和 Codex 用量，不接触令牌内容。
+4. 设置页操作会先通过 DSH Web Host 唤醒 `127.0.0.1:1456`，完成单次状态、刷新或退出请求后立即关闭。
 
-
-控制服务 `127.0.0.1:1456` 只在 `web` profile 中启动；安装到 `tui`
-profile 时，插件仅维护模型凭据，不监听 Web 管理端口。OAuth 回调端口
-`localhost:1455` 仍只在用户实际发起登录后临时监听。
+控制服务 `127.0.0.1:1456` 不常驻：Web 设置页操作时按需启动，单次请求完成后关闭；登录期间保持到授权成功、失败或取消。TUI 的 `/login-codex` 直接启动临时 OAuth 回调端口 `localhost:1455`，流程结束或取消时关闭。
 
 ## 配置
 
-插件通常无需额外配置。`controlServer` 默认为 `false`，bundle 会在
-`web` profile 中自动开启。默认凭据文件为：
+插件通常无需额外配置。默认凭据文件为：
 
 ```text
 $DSH_HOME/openai-codex-auth.json
@@ -81,7 +77,6 @@ $DSH_HOME/openai-codex-auth.json
       name: dsh-openai-codex-auth
       config:
         path: /secure/path/openai-codex-auth.json
-        controlServer: false
 ```
 
 `path` 的优先级高于 `dshHome`。
@@ -93,7 +88,7 @@ $DSH_HOME/openai-codex-auth.json
 - OAuth 授权使用 PKCE，并通过随机 `state` 防止回调串用。
 - 凭据目录与文件分别以 owner-only 权限创建，并通过原子写入更新。
 - access token 与 refresh token 只保存在 Host 侧；Web 页面不会读取或保存它们。
-- 控制服务只监听 `127.0.0.1`，仅接受本地 DSH Web origin。
+- 控制服务只按需监听 `127.0.0.1`；请求或授权流程结束后关闭，并且仅接受本地 DSH Web origin。
 - 登出等状态变更请求必须携带 CSRF token。
 
 ## 常见问题

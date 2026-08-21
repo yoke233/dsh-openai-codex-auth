@@ -7,5 +7,3 @@
 - insert:
     - id: openai-codex-auth
       name: dsh-openai-codex-auth
-      config:
-        controlServer: !!js process.argv.includes('web')

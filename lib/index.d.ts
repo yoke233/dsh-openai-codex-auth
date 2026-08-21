@@ -1,6 +1,11 @@
 /** Native OpenAI Codex OAuth login for DeepSeek Harness. */
 import { Context, Service } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
+import { createServer } from 'node:http';
+/** Replaceable Node boundary for deterministic listener lifecycle tests. */
+export declare const internals: {
+    createServer: typeof createServer;
+};
 /** Persisted OAuth credential. */
 export interface OpenAICodexCredential {
     access: string;
@@ -8,11 +13,9 @@ export interface OpenAICodexCredential {
     expires: number;
     accountId: string;
 }
-/** Plugin configuration. */
 export interface Config {
     path?: string;
     dshHome?: string;
-    controlServer?: boolean;
 }
 interface UsageWindow {
     usedPercent: number;
@@ -42,6 +45,9 @@ export declare class OpenAICodexAuth extends Service {
     private readonly csrf;
     private usageCache;
     private usageError;
+    private controlServerStart;
+    private controlServerRequested;
+    private controlServerStop;
     private loginFlow;
     private lastLoginError;
     constructor(ctx: Context, config: Config);
@@ -53,6 +59,8 @@ export declare class OpenAICodexAuth extends Service {
     private beginBrowserLogin;
     private status;
     private fetchUsage;
+    private ensureControlServer;
+    private stopControlServer;
     private startControlServer;
     private controlRequest;
     private write;
