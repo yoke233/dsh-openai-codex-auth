@@ -59,9 +59,15 @@ dsh --profile web
 3. 凭据原子写入本地文件，访问令牌通过 DSH credentials 注入 `DSH_OPENAI_CODEX_TOKEN`。
 4. 设置页通过本机 `127.0.0.1:1456` 控制服务读取登录状态和 Codex 用量，不接触令牌内容。
 
+
+控制服务 `127.0.0.1:1456` 只在 `web` profile 中启动；安装到 `tui`
+profile 时，插件仅维护模型凭据，不监听 Web 管理端口。OAuth 回调端口
+`localhost:1455` 仍只在用户实际发起登录后临时监听。
+
 ## 配置
 
-插件通常无需额外配置。默认凭据文件为：
+插件通常无需额外配置。`controlServer` 默认为 `false`，bundle 会在
+`web` profile 中自动开启。默认凭据文件为：
 
 ```text
 $DSH_HOME/openai-codex-auth.json
@@ -75,6 +81,7 @@ $DSH_HOME/openai-codex-auth.json
       name: dsh-openai-codex-auth
       config:
         path: /secure/path/openai-codex-auth.json
+        controlServer: false
 ```
 
 `path` 的优先级高于 `dshHome`。

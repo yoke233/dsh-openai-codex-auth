@@ -2,6 +2,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-commands'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { createHash, randomBytes } from 'node:crypto'
@@ -28,7 +29,7 @@ export interface OpenAICodexCredential {
 }
 
 /** Plugin configuration. */
-export interface Config { path?: string; dshHome?: string }
+export interface Config { path?: string; dshHome?: string; controlServer?: boolean }
 
 interface Document { version: 1; credential: OpenAICodexCredential }
 
@@ -169,8 +170,12 @@ declare module '@deepseek-ai/cordis' { interface Context { openaiCodexAuth: Open
 
 /** DSH service providing login, logout, and automatically refreshed bearer tokens. */
 export class OpenAICodexAuth extends Service {
-  static Config: z<Config> = z.object({ path: z.string(), dshHome: z.string() })
-  static inject = ['credentials']
+  static Config: z<Config> = z.object({
+    path: z.string(),
+    dshHome: z.string(),
+    controlServer: z.boolean().default(false),
+  })
+  static inject = ['credentials', 'commands']
   private readonly filename: string
   private readonly csrf = base64Url(randomBytes(24))
   private usageCache: UsageSummary | undefined
@@ -190,7 +195,19 @@ export class OpenAICodexAuth extends Service {
       const timer = setInterval(() => { void this.bearerToken().catch(() => {}) }, 60_000)
       return () => { clearInterval(timer) }
     })
-    ctx.effect(() => this.startControlServer())
+    if (config.controlServer === true) ctx.effect(() => this.startControlServer())
+    ctx.effect(() => () => { this.loginFlow?.abort.abort() })
+    ctx.effect(() => ctx.commands.register({
+      name: 'login-codex',
+      description: '登录 OpenAI Codex 订阅账号',
+      handler: () => {
+        const flow = this.beginBrowserLogin()
+        return {
+          kind: 'success',
+          text: `请在浏览器打开以下链接完成 OpenAI 登录：\n\n${flow.url}\n\n授权完成后，Codex 凭据会自动生效。`,
+        }
+      },
+    }))
   }
 
   /** Return a valid bearer token, refreshing and persisting it when near expiry. */

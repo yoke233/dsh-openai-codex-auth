@@ -12,6 +12,7 @@ export interface OpenAICodexCredential {
 export interface Config {
     path?: string;
     dshHome?: string;
+    controlServer?: boolean;
 }
 interface UsageWindow {
     usedPercent: number;

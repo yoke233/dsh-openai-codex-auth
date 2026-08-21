@@ -1,5 +1,37 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
-import { normalizeUsage } from '../src/index.ts'
+import { normalizeUsage, OpenAICodexAuth } from '../src/index.ts'
+
+describe('TUI command', () => {
+  it('registers login-codex without starting the Web control server', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-codex-auth-'))
+    const ctx = new Context()
+    const register = vi.fn(() => () => {})
+    ctx.provide('credentials', { set: vi.fn(), unset: vi.fn() } as never)
+    ctx.provide('commands', { register } as never)
+    try {
+      await ctx.plugin(OpenAICodexAuth, { dshHome: home, controlServer: false })
+      expect(register).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'login-codex',
+        description: expect.any(String),
+        handler: expect.any(Function),
+      }))
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('plugin config', () => {
+  it('keeps the local control server opt-in', () => {
+    expect(OpenAICodexAuth.Config({})).toMatchObject({ controlServer: false })
+    expect(OpenAICodexAuth.Config({ controlServer: true })).toMatchObject({ controlServer: true })
+  })
+})
 
 describe('normalizeUsage', () => {
   it('projects the Codex rate-limit response used by the settings card', () => {

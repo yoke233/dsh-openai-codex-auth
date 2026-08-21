@@ -32,6 +32,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-commands": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-credentials": "^0.1.0-rc.5"
   },
   "dependencies": {
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-commands": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-credentials": "^0.1.0-rc.5",
     "@types/node": "^22.20.0",
     "typescript": "^6.0.3",
