@@ -4,6 +4,7 @@ import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-settings'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { createHash, randomBytes } from 'node:crypto'
@@ -18,9 +19,12 @@ const REDIRECT_URI = 'http://localhost:1455/auth/callback'
 const DEFAULT_FILENAME = 'openai-codex-auth.json'
 const TOKEN_REF = credentialRef('DSH_OPENAI_CODEX_TOKEN')
 const CONTROL_PORT = 1456
+const CODEX_LATEST_VERSION_URL = 'https://registry.npmjs.org/@openai%2Fcodex/latest'
+const CODEX_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models'
+const MODEL_SYNC_TIMEOUT_MS = 30_000
 
-/** Replaceable Node boundary for deterministic listener lifecycle tests. */
-export const internals = { createServer }
+/** Replaceable Node boundaries for deterministic tests. */
+export const internals = { createServer, fetch: globalThis.fetch }
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
 const USAGE_CACHE_MS = 30_000
 
@@ -48,6 +52,21 @@ interface UsageSummary {
   secondary?: UsageWindow
   limitReached?: boolean
   resetCredits?: number
+  fetchedAt: number
+}
+
+/** Model profile accepted by the DSH pi-ai settings namespace. */
+export interface CodexModelProfile {
+  id: string
+  name?: string
+  contextWindow?: number
+  input?: Array<'text' | 'image'>
+  reasoningEfforts?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>
+}
+
+interface ModelSummary {
+  models: CodexModelProfile[]
+  clientVersion: string
   fetchedAt: number
 }
 
@@ -93,7 +112,7 @@ async function readCredential(filename: string): Promise<OpenAICodexCredential |
 }
 
 async function tokenRequest(body: URLSearchParams, signal?: AbortSignal): Promise<OpenAICodexCredential> {
-  const response = await fetch(TOKEN_URL, {
+  const response = await internals.fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
@@ -161,6 +180,65 @@ export function normalizeUsage(value: unknown): UsageSummary {
   }
 }
 
+/** Resolve the current official Codex CLI version for model-catalog gating. */
+export async function latestCodexClientVersion(signal?: AbortSignal): Promise<string> {
+  const response = await internals.fetch(CODEX_LATEST_VERSION_URL, {
+    headers: { accept: 'application/json', 'user-agent': 'dsh-openai-codex-auth/0.3.0' },
+    cache: 'no-store',
+    ...signal === undefined ? {} : { signal },
+  })
+  if (!response.ok) throw new Error(`Codex version request failed (HTTP ${response.status})`)
+  const value = await response.json() as { version?: unknown } | null
+  const version = value?.version
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error('Codex version response is invalid')
+  }
+  return version
+}
+
+const REASONING_LEVELS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+
+/** Convert an account-specific Codex catalog response into DSH model profiles. */
+export function normalizeModels(value: unknown): CodexModelProfile[] {
+  if (value === null || typeof value !== 'object' || !Array.isArray((value as Record<string, unknown>).models)) {
+    throw new Error('Codex models response does not contain a models array')
+  }
+  const models: CodexModelProfile[] = []
+  const seen = new Set<string>()
+  for (const candidate of (value as { models: unknown[] }).models) {
+    if (candidate === null || typeof candidate !== 'object') continue
+    const row = candidate as Record<string, unknown>
+    if (row.visibility === 'hide' || typeof row.slug !== 'string' || row.slug.length === 0 || seen.has(row.slug)) continue
+    seen.add(row.slug)
+    const contextWindow = Number.isSafeInteger(row.context_window) && (row.context_window as number) > 0
+      ? row.context_window as number
+      : undefined
+    const input = Array.isArray(row.input_modalities)
+      ? row.input_modalities.filter((item): item is 'text' | 'image' => item === 'text' || item === 'image')
+      : []
+    const reasoningEfforts: NonNullable<CodexModelProfile['reasoningEfforts']> = {}
+    if (Array.isArray(row.supported_reasoning_levels)) {
+      for (const candidateLevel of row.supported_reasoning_levels) {
+        if (candidateLevel === null || typeof candidateLevel !== 'object') continue
+        const effort = (candidateLevel as Record<string, unknown>).effort
+        if (effort === 'none' || effort === 'off') reasoningEfforts.off = null
+        else if (typeof effort === 'string' && REASONING_LEVELS.has(effort)) {
+          reasoningEfforts[effort as keyof typeof reasoningEfforts] = effort
+        }
+      }
+    }
+    models.push({
+      id: row.slug,
+      ...typeof row.display_name === 'string' && row.display_name.length > 0 ? { name: row.display_name } : {},
+      ...contextWindow === undefined ? {} : { contextWindow },
+      ...input.length === 0 ? {} : { input },
+      ...Object.keys(reasoningEfforts).length === 0 ? {} : { reasoningEfforts },
+    })
+  }
+  if (models.length === 0) throw new Error('Codex models response contains no visible models')
+  return models
+}
+
 function isLocalOrigin(origin: string | undefined): origin is string {
   if (origin === undefined) return false
   try {
@@ -179,6 +257,9 @@ export class OpenAICodexAuth extends Service {
   private readonly csrf = base64Url(randomBytes(24))
   private usageCache: UsageSummary | undefined
   private usageError: string | undefined
+  private modelCache: ModelSummary | undefined
+  private modelError: string | undefined
+  private modelRefresh: Promise<CodexModelProfile[]> | undefined
   private controlServerStart: Promise<void> | undefined
   private controlServerRequested = false
   private controlServerStop: (() => void) | undefined
@@ -226,6 +307,18 @@ export class OpenAICodexAuth extends Service {
         }
       },
     }))
+    ctx.effect(() => ctx.commands.register({
+      name: 'refresh-codex-models',
+      description: '从 OpenAI 刷新当前账号可用的 Codex 模型',
+      handler: async () => {
+        try {
+          const models = await this.refreshModels()
+          return { kind: 'success', text: `已更新 ${models.length} 个 Codex 模型：${models.map(model => model.id).join('、')}` }
+        } catch (error) {
+          return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+        }
+      },
+    }))
   }
 
   /** Return a valid bearer token, refreshing and persisting it when near expiry. */
@@ -241,6 +334,57 @@ export class OpenAICodexAuth extends Service {
       await this.ctx.credentials.set(TOKEN_REF, next.access)
       return next.access
     })
+  }
+
+
+  /** Fetch this account's visible Codex catalog and publish it to DSH. */
+  async refreshModels(signal?: AbortSignal): Promise<CodexModelProfile[]> {
+    if (this.modelRefresh !== undefined) return this.modelRefresh
+    const timeout = AbortSignal.timeout(MODEL_SYNC_TIMEOUT_MS)
+    const requestSignal = signal === undefined ? timeout : AbortSignal.any([signal, timeout])
+    const pending = this.performModelRefresh(requestSignal)
+    this.modelRefresh = pending
+    try {
+      return await pending
+    } finally {
+      if (this.modelRefresh === pending) this.modelRefresh = undefined
+    }
+  }
+
+  private async performModelRefresh(signal: AbortSignal): Promise<CodexModelProfile[]> {
+    try {
+      let credential = await readCredential(this.filename)
+      if (credential === undefined) throw new Error('OpenAI login is missing')
+      const accountId = credential.accountId
+      const access = await this.bearerToken(signal)
+      if (access === undefined) throw new Error('OpenAI login is missing')
+      credential = await readCredential(this.filename) ?? credential
+      const clientVersion = await latestCodexClientVersion(signal)
+      const modelsUrl = `${CODEX_MODELS_URL}?client_version=${encodeURIComponent(clientVersion)}`
+      const response = await internals.fetch(modelsUrl, {
+        headers: {
+          accept: 'application/json',
+          authorization: `Bearer ${access}`,
+          'chatgpt-account-id': credential.accountId,
+          originator: 'deepseek-harness',
+          'user-agent': 'dsh-openai-codex-auth/0.3.0',
+        },
+        signal,
+      })
+      if (!response.ok) throw new Error(`Codex models request failed (HTTP ${response.status})`)
+      const models = normalizeModels(await response.json())
+      const active = await readCredential(this.filename)
+      if (active?.accountId !== accountId) throw new Error('OpenAI account changed during model synchronization')
+      const settings = this.ctx.get('settings')
+      if (settings === undefined) throw new Error('DSH settings service is unavailable')
+      await settings.update('llm-pi-ai', { providers: { 'openai-codex': { models } } })
+      this.modelCache = { models, clientVersion, fetchedAt: Date.now() }
+      this.modelError = undefined
+      return models
+    } catch (error) {
+      this.modelError = error instanceof Error ? error.message : String(error)
+      throw error
+    }
   }
 
   private createLoginRequest(signal: AbortSignal): { url: string; code: Promise<string>; verifier: string } {
@@ -266,6 +410,7 @@ export class OpenAICodexAuth extends Service {
     await this.ctx.credentials.set(TOKEN_REF, credential.access)
     this.usageCache = undefined
     this.usageError = undefined
+    void this.refreshModels().catch(() => { /* Login remains valid when catalog sync fails. */ })
   }
 
 
@@ -278,6 +423,8 @@ export class OpenAICodexAuth extends Service {
     await this.ctx.credentials.unset(TOKEN_REF)
     this.usageCache = undefined
     this.usageError = undefined
+    this.modelCache = undefined
+    this.modelError = undefined
   }
 
   private beginBrowserLogin(): LoginFlow {
@@ -320,6 +467,8 @@ export class OpenAICodexAuth extends Service {
       expiresAt: credential.expires,
       usage: this.usageCache,
       usageError: this.usageError,
+      models: this.modelCache,
+      modelError: this.modelError,
       csrf: this.csrf,
     }
   }
@@ -327,12 +476,12 @@ export class OpenAICodexAuth extends Service {
   private async fetchUsage(credential: OpenAICodexCredential): Promise<UsageSummary> {
     const access = await this.bearerToken()
     if (access === undefined) throw new Error('OpenAI login is missing')
-    const response = await fetch(USAGE_URL, {
+    const response = await internals.fetch(USAGE_URL, {
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${access}`,
         'chatgpt-account-id': credential.accountId,
-        'user-agent': 'dsh-openai-codex-auth/0.2',
+        'user-agent': 'dsh-openai-codex-auth/0.3.0',
       },
     })
     if (!response.ok) throw new Error(`Codex usage request failed (HTTP ${response.status})`)
@@ -407,6 +556,12 @@ export class OpenAICodexAuth extends Service {
       if (!localOrigin) { send(403, { error: 'This endpoint only accepts a local DSH Web origin.' }); return }
       if (url.pathname === '/status' && request.method === 'GET') {
         send(200, await this.status(url.searchParams.get('refresh') === '1'))
+        return
+      }
+      if (url.pathname === '/models' && request.method === 'POST') {
+        if (request.headers['x-dsh-csrf'] !== this.csrf) { send(403, { error: 'Invalid CSRF token.' }); return }
+        const models = await this.refreshModels()
+        send(200, { models: models.map(model => ({ id: model.id, name: model.name })) })
         return
       }
       if (url.pathname === '/logout' && request.method === 'POST') {

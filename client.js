@@ -145,6 +145,19 @@ window.__ModuleLoader__.load({
         setBusy(false)
       }
 
+      const refreshModels = async () => {
+        if (!status || !status.csrf) return
+        setBusy(true)
+        try {
+          await wake()
+          const response = await fetch(BASE + '/models', { method: 'POST', headers: { 'x-dsh-csrf': status.csrf } })
+          const value = await response.json()
+          if (!response.ok) throw new Error(value.error || 'HTTP ' + response.status)
+          await load(false)
+        } catch (modelError) { setError(messageOf(modelError)) }
+        finally { setBusy(false) }
+      }
+
       const usage = status && status.usage
       const loading = busy
       const connected = Boolean(status && status.loggedIn)
@@ -184,7 +197,11 @@ window.__ModuleLoader__.load({
                       ? h('div', { className: 'codexGrid' }, windows.map((row) => h(UsageCard, { key: row.name, name: row.name, window: row.window })))
                       : h('p', { className: 'codexEmpty' }, '账号已连接，暂时没有返回可展示的额度窗口。'),
                     usage && Number.isFinite(usage.resetCredits) ? h('p', { className: 'codexNotice' }, '可用额度重置次数：' + usage.resetCredits) : null,
+                    status.models && status.models.models
+                      ? h('p', { className: 'codexNotice' }, '当前账号可用模型（Codex ' + status.models.clientVersion + '）：' + status.models.models.map((model) => model.name || model.id).join('、'))
+                      : null,
                     status.usageError ? h('p', { className: 'codexError', role: 'status' }, '额度读取失败：' + status.usageError) : null,
+                    status.modelError ? h('p', { className: 'codexError', role: 'status' }, '模型同步失败：' + status.modelError) : null,
                   )
                 : h('p', { className: 'codexEmpty' }, '点击登录会打开 OpenAI 官方授权页。插件仅在 Host 侧保存和刷新令牌，Web 页面不会读取令牌。'),
             status && status.loginError ? h('p', { className: 'codexError', role: 'alert' }, '登录失败：' + status.loginError) : null,
@@ -193,6 +210,7 @@ window.__ModuleLoader__.load({
               h('button', { type: 'button', className: 'codexButton primary', disabled: busy || pending, onClick: () => { void login() } }, connected ? '重新登录' : pending ? '等待授权…' : '登录 OpenAI'),
               status === null ? h('button', { type: 'button', className: 'codexButton', disabled: busy, onClick: refresh }, busy ? '读取中…' : '读取登录状态') : null,
               connected ? h('button', { type: 'button', className: 'codexButton', disabled: busy, onClick: refresh }, busy ? '刷新中…' : '刷新用量') : null,
+              connected ? h('button', { type: 'button', className: 'codexButton', disabled: busy, onClick: () => { void refreshModels() } }, busy ? '同步中…' : '同步模型') : null,
               connected ? h('button', { type: 'button', className: 'codexButton danger', disabled: busy, onClick: () => { void logout() } }, '退出登录') : null,
             ),
           ),

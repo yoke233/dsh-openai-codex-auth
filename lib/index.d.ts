@@ -2,9 +2,10 @@
 import { Context, Service } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 import { createServer } from 'node:http';
-/** Replaceable Node boundary for deterministic listener lifecycle tests. */
+/** Replaceable Node boundaries for deterministic tests. */
 export declare const internals: {
     createServer: typeof createServer;
+    fetch: typeof fetch;
 };
 /** Persisted OAuth credential. */
 export interface OpenAICodexCredential {
@@ -30,8 +31,20 @@ interface UsageSummary {
     resetCredits?: number;
     fetchedAt: number;
 }
+/** Model profile accepted by the DSH pi-ai settings namespace. */
+export interface CodexModelProfile {
+    id: string;
+    name?: string;
+    contextWindow?: number;
+    input?: Array<'text' | 'image'>;
+    reasoningEfforts?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>;
+}
 /** Reduce the OpenAI response to the stable fields displayed by the Web card. */
 export declare function normalizeUsage(value: unknown): UsageSummary;
+/** Resolve the current official Codex CLI version for model-catalog gating. */
+export declare function latestCodexClientVersion(signal?: AbortSignal): Promise<string>;
+/** Convert an account-specific Codex catalog response into DSH model profiles. */
+export declare function normalizeModels(value: unknown): CodexModelProfile[];
 declare module '@deepseek-ai/cordis' {
     interface Context {
         openaiCodexAuth: OpenAICodexAuth;
@@ -45,6 +58,9 @@ export declare class OpenAICodexAuth extends Service {
     private readonly csrf;
     private usageCache;
     private usageError;
+    private modelCache;
+    private modelError;
+    private modelRefresh;
     private controlServerStart;
     private controlServerRequested;
     private controlServerStop;
@@ -53,6 +69,9 @@ export declare class OpenAICodexAuth extends Service {
     constructor(ctx: Context, config: Config);
     /** Return a valid bearer token, refreshing and persisting it when near expiry. */
     bearerToken(signal?: AbortSignal): Promise<string | undefined>;
+    /** Fetch this account's visible Codex catalog and publish it to DSH. */
+    refreshModels(signal?: AbortSignal): Promise<CodexModelProfile[]>;
+    private performModelRefresh;
     private createLoginRequest;
     private finishLogin;
     private logout;
