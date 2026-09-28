@@ -22,6 +22,7 @@ const CONTROL_PORT = 1456
 const CODEX_LATEST_VERSION_URL = 'https://registry.npmjs.org/@openai%2Fcodex/latest'
 const CODEX_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models'
 const MODEL_SYNC_TIMEOUT_MS = 30_000
+const USER_AGENT = 'dsh-openai-codex-auth/0.3.1'
 
 /** Replaceable Node boundaries for deterministic tests. */
 export const internals = { createServer, fetch: globalThis.fetch }
@@ -183,7 +184,7 @@ export function normalizeUsage(value: unknown): UsageSummary {
 /** Resolve the current official Codex CLI version for model-catalog gating. */
 export async function latestCodexClientVersion(signal?: AbortSignal): Promise<string> {
   const response = await internals.fetch(CODEX_LATEST_VERSION_URL, {
-    headers: { accept: 'application/json', 'user-agent': 'dsh-openai-codex-auth/0.3.0' },
+    headers: { accept: 'application/json', 'user-agent': USER_AGENT },
     cache: 'no-store',
     ...signal === undefined ? {} : { signal },
   })
@@ -367,7 +368,7 @@ export class OpenAICodexAuth extends Service {
           authorization: `Bearer ${access}`,
           'chatgpt-account-id': credential.accountId,
           originator: 'deepseek-harness',
-          'user-agent': 'dsh-openai-codex-auth/0.3.0',
+          'user-agent': USER_AGENT,
         },
         signal,
       })
@@ -377,7 +378,11 @@ export class OpenAICodexAuth extends Service {
       if (active?.accountId !== accountId) throw new Error('OpenAI account changed during model synchronization')
       const settings = this.ctx.get('settings')
       if (settings === undefined) throw new Error('DSH settings service is unavailable')
-      await settings.update('llm-pi-ai', { providers: { 'openai-codex': { models } } })
+      await settings.mutate('llm-pi-ai', [{
+        op: 'set',
+        path: ['providers', 'openai-codex', 'models'],
+        value: models,
+      }])
       this.modelCache = { models, clientVersion, fetchedAt: Date.now() }
       this.modelError = undefined
       return models
@@ -481,7 +486,7 @@ export class OpenAICodexAuth extends Service {
         accept: 'application/json',
         authorization: `Bearer ${access}`,
         'chatgpt-account-id': credential.accountId,
-        'user-agent': 'dsh-openai-codex-auth/0.3.0',
+        'user-agent': USER_AGENT,
       },
     })
     if (!response.ok) throw new Error(`Codex usage request failed (HTTP ${response.status})`)

@@ -12,38 +12,32 @@ window.__ModuleLoader__.load({
     const WAKE = '/api/plugins/openai-codex-auth/control'
 
     const css = `
-      .codexSection{max-width:760px;padding:24px 28px 40px;color:var(--text-primary,#202124)}
+      .codexSection{max-width:760px;padding:24px 28px 40px;color:var(--dsw-alias-label-primary)}
       .codexTitle{margin:0 0 6px;font-size:22px;line-height:1.3;font-weight:650}
-      .codexIntro{margin:0 0 20px;color:var(--text-secondary,#6b7280);font-size:14px;line-height:1.65}
-      .codexCard{overflow:hidden;border:1px solid var(--border-primary,#e5e7eb);border-radius:16px;background:var(--background-primary,#fff);box-shadow:0 8px 30px rgba(15,23,42,.05)}
+      .codexIntro{margin:0 0 20px;color:var(--dsw-alias-label-secondary);font-size:14px;line-height:1.65}
+      .codexCard{overflow:hidden;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-xl);background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-elevation-panel)}
       .codexHero{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:22px 22px 18px;background:linear-gradient(135deg,rgba(16,185,129,.10),rgba(59,130,246,.07))}
       .codexBrand{display:flex;align-items:center;gap:12px;min-width:0}
       .codexLogo{display:grid;place-items:center;width:42px;height:42px;flex:0 0 auto;border-radius:12px;background:#111827;color:#fff;font:700 14px/1 ui-monospace,SFMono-Regular,Consolas,monospace}
-      .codexName{margin:0;font-size:17px;font-weight:650}.codexMeta{margin:4px 0 0;color:var(--text-secondary,#667085);font-size:12px;overflow-wrap:anywhere}
-      .codexBadge{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:600;background:rgba(107,114,128,.12);color:#667085}
-      .codexBadge.connected{background:rgba(16,185,129,.13);color:#07835d}.codexBadge.pending{background:rgba(245,158,11,.14);color:#a35f00}
+      .codexName{margin:0;font-size:17px;font-weight:650}.codexMeta{margin:4px 0 0;color:var(--dsw-alias-label-secondary);font-size:12px;overflow-wrap:anywhere}
+      .codexBadge{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:600;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary)}
+      .codexBadge.connected{background:rgba(16,185,129,.13);color:var(--dsw-alias-state-success-primary)}.codexBadge.pending{background:rgba(245,158,11,.14);color:var(--dsw-alias-state-warn-primary)}
       .codexDot{width:7px;height:7px;border-radius:50%;background:currentColor}
       .codexBody{padding:20px 22px 22px}.codexActions{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}
-      .codexButton{appearance:none;border:1px solid var(--border-primary,#d7dce2);border-radius:9px;background:var(--background-primary,#fff);color:var(--text-primary,#202124);padding:8px 13px;font:600 13px/1.2 inherit;cursor:pointer;transition:.15s ease}
-      .codexButton:hover{border-color:#8b96a5;background:var(--background-secondary,#f7f8fa)}.codexButton:disabled{opacity:.5;cursor:not-allowed}
-      .codexButton.primary{border-color:#111827;background:#111827;color:#fff}.codexButton.primary:hover{background:#2a3443}.codexButton.danger{color:#c23b3b}
+      .codexButton{appearance:none;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);padding:8px 13px;font:600 13px/1.2 inherit;cursor:pointer;transition:.15s ease}
+      .codexButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.codexButton:disabled{opacity:.5;cursor:not-allowed}
+      .codexButton.primary{border-color:var(--dsw-alias-brand-primary-new-colorprimary-new-color);background:var(--dsw-alias-brand-primary-new-colorprimary-new-color);color:#fff}.codexButton.primary:hover{filter:brightness(.92)}.codexButton.danger{color:var(--dsw-alias-state-error-primary)}
       .codexGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:17px}
-      .codexUsage{border:1px solid var(--border-primary,#e5e7eb);border-radius:12px;padding:14px;background:var(--background-secondary,#fafafa)}
-      .codexUsageHead{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.codexUsageName{font-size:13px;font-weight:600}.codexUsageValue{font-size:12px;color:var(--text-secondary,#667085)}
+      .codexUsage{border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);padding:14px;background:var(--dsw-alias-bg-module-platform)}
+      .codexUsageHead{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.codexUsageName{font-size:13px;font-weight:600}.codexUsageValue{font-size:12px;color:var(--dsw-alias-label-secondary)}
       .codexBar{height:8px;margin:11px 0 9px;overflow:hidden;border-radius:999px;background:rgba(107,114,128,.16)}.codexBarFill{height:100%;border-radius:inherit;background:linear-gradient(90deg,#10b981,#3b82f6);transition:width .25s ease}.codexBarFill.high{background:linear-gradient(90deg,#f59e0b,#ef4444)}
-      .codexReset{font-size:12px;color:var(--text-secondary,#667085)}
-      .codexPlan{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}.codexPlan strong{font-size:14px}.codexPlan span{font-size:12px;color:var(--text-secondary,#667085)}
-      .codexNotice{margin:15px 0 0;border-radius:10px;padding:10px 12px;background:rgba(59,130,246,.08);color:var(--text-secondary,#526071);font-size:12px;line-height:1.55}
-      .codexError{margin:14px 0 0;border-radius:10px;padding:10px 12px;background:rgba(239,68,68,.09);color:#b42318;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
-      .codexEmpty{padding:6px 0;color:var(--text-secondary,#667085);font-size:13px;line-height:1.6}.codexSkeleton{height:9px;margin:10px 0;border-radius:99px;background:linear-gradient(90deg,#eee,#f7f7f7,#eee);background-size:200% 100%;animation:codexPulse 1.2s infinite}
+      .codexReset{font-size:12px;color:var(--dsw-alias-label-secondary)}
+      .codexPlan{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}.codexPlan strong{font-size:14px}.codexPlan span{font-size:12px;color:var(--dsw-alias-label-secondary)}
+      .codexNotice{margin:15px 0 0;border-radius:var(--dsw-radius-md);padding:10px 12px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.55}
+      .codexError{margin:14px 0 0;border-radius:var(--dsw-radius-md);padding:10px 12px;background:rgba(239,68,68,.09);color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+      .codexEmpty{padding:6px 0;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.6}.codexSkeleton{height:9px;margin:10px 0;border-radius:99px;background:var(--dsw-alias-bg-module-platform);animation:codexPulse 1.2s infinite}
       @keyframes codexPulse{to{background-position:-200% 0}}@media(max-width:620px){.codexSection{padding:18px 15px 30px}.codexHero{padding:18px;flex-direction:column}.codexBody{padding:17px 18px 20px}.codexGrid{grid-template-columns:1fr}}
     `
-    if (typeof document !== 'undefined' && document.querySelector('style[data-plugin="' + PLUGIN_ID + '"]') === null) {
-      const style = document.createElement('style')
-      style.dataset.plugin = PLUGIN_ID
-      style.textContent = css
-      document.head.appendChild(style)
-    }
 
     function messageOf(error) {
       return error instanceof Error ? error.message : String(error)
@@ -172,6 +166,7 @@ window.__ModuleLoader__.load({
       }, [usage])
 
       return h('section', { className: 'codexSection' },
+        h('style', { 'data-plugin': PLUGIN_ID }, css),
         h('h2', { className: 'codexTitle' }, 'OpenAI Codex'),
         h('p', { className: 'codexIntro' }, '使用 ChatGPT Plus、Pro、Team 或 Enterprise 订阅登录，并在这里查看 Codex 额度。登录结果自动用于“模型提供方”中的 openai-codex。'),
         h('div', { className: 'codexCard' },

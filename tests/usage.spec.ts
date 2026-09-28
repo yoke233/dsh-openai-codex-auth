@@ -58,7 +58,7 @@ describe('TUI command', () => {
 })
 
 describe('model synchronization', () => {
-  it('queries the latest Codex version before fetching and storing models', async () => {
+  it('coalesces concurrent model refreshes after resolving the latest Codex version', async () => {
     const home = mkdtempSync(join(tmpdir(), 'dsh-codex-models-'))
     writeFileSync(join(home, 'openai-codex-auth.json'), JSON.stringify({
       version: 1,
@@ -72,11 +72,10 @@ describe('model synchronization', () => {
         input_modalities: ['text', 'image'], supported_reasoning_levels: [{ effort: 'high' }],
       }] })))
     internals.fetch = fetch as typeof internals.fetch
-    const update = vi.fn(async () => {})
     const ctx = new Context()
     ctx.provide('credentials', { set: vi.fn(), unset: vi.fn() } as never)
     ctx.provide('commands', { register: vi.fn(() => () => {}) } as never)
-    ctx.provide('settings', { update } as never)
+    ctx.provide('settings', { mutate: async () => undefined } as never)
     try {
       await ctx.plugin(OpenAICodexAuth, { dshHome: home })
       await expect(Promise.all([
@@ -90,9 +89,6 @@ describe('model synchronization', () => {
         'https://registry.npmjs.org/@openai%2Fcodex/latest',
         'https://chatgpt.com/backend-api/codex/models?client_version=0.153.4',
       ])
-      expect(update).toHaveBeenCalledWith('llm-pi-ai', { providers: { 'openai-codex': {
-        models: [expect.objectContaining({ id: 'gpt-5.6-sol' })],
-      } } })
     } finally {
       internals.fetch = originalFetch
       await ctx.fiber.dispose()

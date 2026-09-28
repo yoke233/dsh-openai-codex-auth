@@ -16,6 +16,8 @@
 </p>
 
 ## 快速开始
+需要 DeepSeek Harness `0.1.7-rc.2`。该版本内置的 `@deepseek-ai/dsh-llm-pi-ai` 已提供 `openai-codex` provider；本插件把续期后的 OAuth access token 通过 credentials 引用交给该 provider，不会把令牌写入 profile 配置。
+
 
 将插件安装到 DSH 的 `web` profile：
 
@@ -35,13 +37,14 @@ dsh --profile web
 2. 点击 **登录 OpenAI**，在弹出的 OpenAI 官方授权页完成登录。
 3. 返回 DSH，在 **设置 → 模型提供方** 中选择 `openai-codex`。
 
-TUI 中可按需同步当前账号的可用模型：
+TUI 也可以直接开始登录或同步当前账号的可用模型：
 
 ```text
+/login-codex
 /refresh-codex-models
 ```
 
-插件仅在登录成功后自动同步一次；之后只会在执行上述命令或点击 Web 设置页的 **同步模型** 时再次请求，不会定时轮询模型目录。每次同步会先从官方 npm registry 读取 `@openai/codex` 最新版本，再用该版本请求账号模型目录；并发触发会合并为同一次同步。
+插件仅在登录成功后自动同步一次；之后只会在执行同步命令或点击 Web 设置页的 **同步模型** 时再次请求，不会定时轮询模型目录。每次同步会先从官方 npm registry 读取 `@openai/codex` 最新版本，再用该版本请求账号模型目录；并发触发会合并为同一次同步。同步使用 Settings 的路径修改，只替换 `llm-pi-ai` 下 `openai-codex.models`，不会覆盖该 provider 的凭据引用等其他配置。
 
 > [!IMPORTANT]
 > 登录管理接口只监听 `127.0.0.1`。请在运行 DSH Web profile 的同一台电脑上打开设置页并完成授权。
@@ -65,10 +68,12 @@ TUI 中可按需同步当前账号的可用模型：
 
 1. 插件生成 PKCE verifier、challenge 和随机 `state`，再打开 OpenAI 授权页。
 2. OpenAI 将授权结果返回到本机 `localhost:1455`；插件校验 `state` 并交换令牌。
-3. 凭据原子写入本地文件，访问令牌通过 DSH credentials 注入 `DSH_OPENAI_CODEX_TOKEN`。
+3. 凭据继续原子写入 `$DSH_HOME/openai-codex-auth.json`（版本 1 格式）；升级不会要求重新登录。访问令牌同时通过 DSH credentials 中的 `DSH_OPENAI_CODEX_TOKEN` 引用交给 `openai-codex` provider。
 4. 设置页操作会先通过 DSH Web Host 唤醒 `127.0.0.1:1456`，完成单次状态、刷新或退出请求后立即关闭。
 
 控制服务 `127.0.0.1:1456` 不常驻：Web 设置页操作时按需启动，单次请求完成后关闭；登录期间保持到授权成功、失败或取消。TUI 的 `/login-codex` 直接启动临时 OAuth 回调端口 `localhost:1455`，流程结束或取消时关闭。
+
+新版 Harness 的 pi-ai catalog 原生包含 `openai-codex` 协议、`gpt-5.6-sol` 与 `gpt-5.3-codex-spark`。账号目录同步会把当前账号返回的可见模型写入同一 provider，因此正文模型与会话标题模型都沿用 OpenAI Codex OAuth，而不会回退到其他 provider。
 
 ## 配置
 
